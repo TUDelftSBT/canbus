@@ -89,6 +89,35 @@ func (sck *Socket) Send(id uint32, data []byte) (int, error) {
 	return sck.dev.Write(frame[:])
 }
 
+type CANMessage struct {
+	RawData [frameSize]byte
+}
+
+func (msg *CANMessage) GetLen() int {
+	return int(msg.RawData[4])
+}
+func (msg *CANMessage) GetID() uint32 {
+	ID := binary.LittleEndian.Uint32(msg.RawData[:4])
+	return (ID & unix.CAN_SFF_MASK)
+}
+
+func (msg *CANMessage) GetData() []byte {
+	return msg.RawData[8:]
+}
+
+func (sck *Socket) RecvRaw(msg *CANMessage) error {
+	n, err := io.ReadFull(sck.dev, msg.RawData[:])
+	if err != nil {
+		return err
+	}
+
+	if n != int(frameSize) {
+		return io.ErrUnexpectedEOF
+	}
+
+	return nil
+}
+
 // Recv receives data from the CAN socket.
 // id is the CAN_frame id the data was originated from.
 func (sck *Socket) Recv() (id uint32, data []byte, err error) {
