@@ -5,28 +5,30 @@
 package canbus_test
 
 import (
+	"crypto/rand"
+	"fmt"
 	"github.com/TUDelftSBT/canbus"
-	"log"
 	"reflect"
 	"testing"
 )
 
-func setupSocket(t *testing.T, dev string) *canbus.Socket {
+func setupSocket(dev string) (*canbus.Socket, error) {
 	r, err := canbus.New()
 	if err != nil {
-		t.Fatal(err)
+		return nil, err
 	}
 	err = r.Bind(dev)
 	if err != nil {
-		log.Fatal(err)
+		return nil, err
 	}
-	return r
+	return r, nil
 }
 
-func teardownSocket(t *testing.T, s *canbus.Socket) {
+func teardownSocket(s *canbus.Socket) error {
 	if err := s.Close(); err != nil {
-		t.Fatal(err)
+		return err
 	}
+	return nil
 }
 
 func TestSocket(t *testing.T) {
@@ -37,8 +39,14 @@ func TestSocket(t *testing.T) {
 	)
 	var msg = []byte{0, 0xde, 0xad, 0xbe, 0xef}
 
-	r := setupSocket(t, endpoint)
-	w := setupSocket(t, endpoint)
+	r, err := setupSocket(endpoint)
+	if err != nil {
+		t.Fatal(err)
+	}
+	w, err := setupSocket(endpoint)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	t.Run("Recv", func(t *testing.T) {
 		go func() {
@@ -107,8 +115,78 @@ func TestSocket(t *testing.T) {
 		}
 
 	})
+	if err := teardownSocket(r); err != nil {
+		t.Fatal(err)
+	}
+	if err := teardownSocket(w); err != nil {
+		t.Fatal(err)
+	}
+}
 
-	teardownSocket(t, r)
-	teardownSocket(t, w)
+func BenchmarkRecv(b *testing.B) {
+	const (
+		dev = "vcan0"
+		ID  = 707
+	)
 
+	//Setup
+	r, err := setupSocket(dev)
+	if err != nil {
+		b.Fatal(err)
+	}
+	w, err := setupSocket(dev)
+	if err != nil {
+		b.Fatal(err)
+	}
+	b.ReportAllocs()
+
+	canmsg := canbus.CANMessage{}
+	quit := make(chan bool)
+	sendmsgs := func(l int) {
+		msg := make([]byte, l)
+		_, err := rand.Read(msg)
+		if err != nil {
+			b.Fatalf("Error reading random bytes: %v\n", err)
+		}
+		for {
+			select {
+			case <-quit:
+				return
+			default:
+				_, err := w.Send(ID, msg)
+				if err != nil {
+					b.Fatalf("error send: %v\n", err)
+				}
+			}
+
+		}
+	}
+
+	for l := 2; l <= 8; l = l * 2 {
+		go sendmsgs(l)
+		b.Run(fmt.Sprintf("RecvRaw%db", l), func(b *testing.B) {
+			b.SetBytes(int64(l))
+			for i := 0; i < b.N; i++ {
+				err := r.RecvRaw(&canmsg)
+				if err != nil {
+					b.Fatalf("error RecvRaw: %v\n", err)
+				}
+			}
+
+		})
+		b.Run(fmt.Sprintf("Recv%db", l), func(b *testing.B) {
+			b.SetBytes(int64(l))
+			for i := 0; i < b.N; i++ {
+				_, _, err := r.Recv()
+				if err != nil {
+					b.Fatalf("error Recv: %v\n", err)
+				}
+			}
+
+		})
+		quit <- true
+
+	}
+	teardownSocket(r)
+	teardownSocket(w)
 }
