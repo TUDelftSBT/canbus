@@ -26,6 +26,7 @@ import (
 
 var (
 	errDataTooBig = errors.New("canbus: data too big")
+	errFrame      = errors.New("Error frame")
 )
 
 // New returns a new CAN bus socket.
@@ -80,7 +81,7 @@ func (sck *Socket) Send(id uint32, data []byte) (int, error) {
 		return 0, errDataTooBig
 	}
 
-	id &= unix.CAN_SFF_MASK
+	id &= unix.CAN_EFF_MASK
 	var frame [frameSize]byte
 	binary.LittleEndian.PutUint32(frame[:4], id)
 	frame[4] = byte(len(data))
@@ -96,6 +97,18 @@ type CANMessage struct {
 func (msg *CANMessage) GetLen() int {
 	return int(msg.RawData[4])
 }
+
+func getId(id uint32) (uint32, error) {
+	if (id & unix.CAN_ERR_FLAG) != 0 {
+		return unix.CAN_ERR_FLAG, errFrame
+	} else if (id & unix.CAN_EFF_FLAG) == 0 {
+		id &= unix.CAN_SFF_MASK
+	} else {
+		id &= unix.CAN_EFF_MASK
+	}
+	return id, nil
+}
+
 func (msg *CANMessage) GetID() uint32 {
 	ID := binary.LittleEndian.Uint32(msg.RawData[:4])
 	return (ID & unix.CAN_SFF_MASK)
@@ -132,7 +145,6 @@ func (sck *Socket) Recv() (id uint32, data []byte, err error) {
 	}
 
 	id = binary.LittleEndian.Uint32(frame[:4])
-	id &= unix.CAN_SFF_MASK
 	data = make([]byte, frame[4])
 	copy(data, frame[8:])
 	return id, data, nil

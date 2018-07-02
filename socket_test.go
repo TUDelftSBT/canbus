@@ -31,6 +31,45 @@ func teardownSocket(s *canbus.Socket) error {
 	return nil
 }
 
+func TestExtendenFrameFormat(t *testing.T) {
+	const (
+		endpoint = "vcan0"
+		ID       = 4096
+	)
+	msg := []byte{0x13, 0x37}
+
+	r, err := setupSocket(endpoint)
+	if err != nil {
+		t.Fatal(err)
+	}
+	w, err := setupSocket(endpoint)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	go func() {
+		_, err := w.Send(ID, msg)
+		if err != nil {
+			t.Fatalf("error send: %v\n", err)
+		}
+	}()
+
+	id, data, err := r.Recv()
+	if id != ID {
+		t.Errorf("got id=%v. want=%d\n", id, ID)
+	}
+	if !reflect.DeepEqual(data[:], msg[:]) {
+		t.Errorf("error data:\ngot= %v\nwant=%v\n", data[1:], msg[1:])
+	}
+
+	if err := teardownSocket(r); err != nil {
+		t.Fatal(err)
+	}
+	if err := teardownSocket(w); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestSocket(t *testing.T) {
 	const (
 		endpoint = "vcan0"
